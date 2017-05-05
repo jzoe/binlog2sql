@@ -97,7 +97,7 @@ Create Table: CREATE TABLE `user` (
 
 首先我们安装binlog2sql：
 
-```
+```bash
 shell> git clone https://github.com/danfengcao/binlog2sql.git && cd binlog2sql
 shell> pip install -r requirements.txt
 ```
@@ -134,7 +134,7 @@ mysql> select count(*) from user;
 
 1. 登录mysql，查看目前的binlog文件
 
-	```bash
+```bash
 mysql> show master logs;
 +------------------+-----------+
 | Log_name         | File_size |
@@ -146,7 +146,7 @@ mysql> show master logs;
 
 2. 最新的binlog文件是mysql-bin.000054。我们的目标是筛选出需要回滚的SQL，由于误操作人只知道大致的误操作时间，我们首先根据时间做一次过滤。只需要解析test库user表。(注：如果有多个sql误操作，则生成的binlog可能分布在多个文件，需解析多个文件)
 
-	```bash
+```bash
 shell> python binlog2sql/binlog2sql.py -h127.0.0.1 -P3306 -uadmin -p'admin' -dtest -tuser --start-file='mysql-bin.000054' --start-datetime='2016-12-26 11:44:00' --stop-datetime='2016-12-26 11:50:00' > /tmp/raw.sql
 raw.sql 输出：
 DELETE FROM `test`.`user` WHERE `addtime`='2014-11-11 00:04:48' AND `id`=2 AND `name`='小钱' LIMIT 1; #start 257427 end 265754 time 2016-12-26 11:44:56
@@ -159,7 +159,7 @@ INSERT INTO `test`.`user`(`addtime`, `id`, `name`) VALUES ('2016-12-10 00:04:33'
 
 3. 根据位置信息，我们确定了误操作sql来自同一个事务，准确位置在257427-504272之间(binlog2sql对于同一个事务会输出同样的start position)。再根据位置过滤，使用 _**-B**_ 选项生成回滚sql，检查回滚sql是否正确。(注：真实场景下，生成的回滚SQL经常会需要进一步筛选。结合grep、编辑器等)
 
-	```bash
+```bash
 shell> python binlog2sql/binlog2sql.py -h127.0.0.1 -P3306 -uadmin -p'admin' -dtest -tuser --start-file='mysql-bin.000054' --start-position=257427 --stop-position=504272 -B > /tmp/rollback.sql
 rollback.sql 输出：
 INSERT INTO `test`.`user`(`addtime`, `id`, `name`) VALUES ('2016-12-14 23:09:07', 24530, 'tt'); #start 257427 end 504272 time 2016-12-26 11:44:56
@@ -167,16 +167,16 @@ INSERT INTO `test`.`user`(`addtime`, `id`, `name`) VALUES ('2016-12-12 00:00:00'
 ...
 INSERT INTO `test`.`user`(`addtime`, `id`, `name`) VALUES ('2014-11-11 00:04:48', 2, '小钱'); #start 257427 end 265754 time 2016-12-26 11:44:56
 
-	shell> wc -l /tmp/rollback.sql
+shell> wc -l /tmp/rollback.sql
 16128 /tmp/rollback.sql
-	```
+```
         
 4. 与业务方确认回滚sql没问题，执行回滚语句。登录mysql，确认回滚成功。
 
-	```bash
-	shell> mysql -h127.0.0.1 -P3306 -uadmin -p'admin' < /tmp/rollback.sql
+```bash
+shell> mysql -h127.0.0.1 -P3306 -uadmin -p'admin' < /tmp/rollback.sql
 
-	mysql> select count(*) from user;
+mysql> select count(*) from user;
 +----------+
 | count(*) |
 +----------+
@@ -184,7 +184,7 @@ INSERT INTO `test`.`user`(`addtime`, `id`, `name`) VALUES ('2014-11-11 00:04:48'
 +----------+
 ```
 
-###TIPS
+### TIPS
 * 闪回的关键是快速筛选出真正需要回滚的SQL。
 * 先根据库、表、时间做一次过滤，再根据位置做更准确的过滤。
 * 由于数据一直在写入，要确保回滚sql中不包含其他数据。可根据是否是同一事务、误操作行数、字段值的特征等等来帮助判断。
@@ -192,7 +192,7 @@ INSERT INTO `test`.`user`(`addtime`, `id`, `name`) VALUES ('2014-11-11 00:04:48'
 * 如果待回滚的表与其他表有关联，要与开发说明回滚和不回滚各自的副作用，再确定方案。
 * 回滚后数据变化，可能对用户和线上应用造成困惑(类似幻读)。
 
-####再重复下最重要的两点：**筛选出正确SQL**！**沟通清楚**！
+#### 再重复下最重要的两点：**筛选出正确SQL**！**沟通清楚**！
 
 闪回工具
 ===
@@ -240,7 +240,7 @@ MySQL闪回特性最早由阿里彭立勋开发，彭在2012年给官方提交�
 就目前的闪回工具而言，线上环境的闪回，笔者建议使用binlog2sql，离线解析使用mysqlbinlog。
 
 
-###关于DDL的flashback
+### 关于DDL的flashback
 本文所述的flashback仅针对DML语句的快速回滚。但如果误操作是DDL的话，是无法利用binlog做快速回滚的，因为即使在row模式下，binlog对于DDL操作也不会记录每行数据的变化。要实现DDL快速回滚，必须修改MySQL源码，使得在执行DDL前先备份老数据。目前有多个mysql定制版本实现了DDL闪回特性，阿里林晓斌团队提交了patch给MySQL官方，MariaDB预计在不久后加入包含DDL的flashback特性。DDL闪回的副作用是会增加额外存储。考虑到其应用频次实在过低，本文不做详述，有兴趣的同学可以自己去了解，重要的几篇文章我在参考资料中做了引用。
 
 
